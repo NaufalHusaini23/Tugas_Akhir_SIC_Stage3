@@ -23,7 +23,7 @@ TOPIC_OUTPUT = "iot/sic/make/output"
 MODEL_PATH = "iot_temp_model.pkl"
 
 MAX_POINTS = 200
-ANOMALY_Z_THRESHOLD = 3.0 # Variabel global
+ANOMALY_Z_THRESHOLD = 3.0 # Variabel global default
 
 # -----------------------
 # Session state init
@@ -130,7 +130,7 @@ def process_incoming():
     updated = False
     q = st.session_state.mqtt_in_q
     
-    # Ambil nilai threshold global terbaru dari UI
+    # Ambil nilai threshold global terbaru
     global ANOMALY_Z_THRESHOLD 
     current_z_threshold = ANOMALY_Z_THRESHOLD 
 
@@ -246,16 +246,16 @@ with left:
 
     st.markdown("### Anomaly Settings")
     
-    # PERBAIKAN: Deklarasi global harus di awal blok UI yang memodifikasi variabel
+    # PERBAIKAN SYNTAX ERROR: global harus di baris ini
     global ANOMALY_Z_THRESHOLD 
     
     w = st.slider("anomaly window (history points)", 5, 200, st.session_state.anomaly_window)
     st.session_state.anomaly_window = w
     
-    # ANOMALY_Z_THRESHOLD digunakan di sini
+    # ANOMALY_Z_THRESHOLD digunakan (dibaca) di sini
     zthr = st.number_input("z-score threshold", value=float(ANOMALY_Z_THRESHOLD))
     
-    # ANOMALY_Z_THRESHOLD diubah di sini
+    # ANOMALY_Z_THRESHOLD diubah (ditulis) di sini
     ANOMALY_Z_THRESHOLD = float(zthr)
 
     st.markdown("### Download Logs")
