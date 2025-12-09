@@ -196,7 +196,7 @@ process_incoming()
 # UI
 # -----------------------
 st.set_page_config(page_title="IoT ML Realtime Dashboard", layout="wide")
-st.title("🔥 IoT ML Realtime Dashboard — ML Enhanced Version")
+st.title("IoT ML Realtime Dashboard — Pemantauan Ruang Server")
 
 # Model status
 if st.session_state.model_loaded:
@@ -294,3 +294,4 @@ with right:
         st.dataframe(pd.DataFrame(st.session_state.logs)[::-1].head(50))
 
 process_incoming()
+
