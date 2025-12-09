@@ -57,7 +57,7 @@ model = load_model(MODEL_PATH)
 st.session_state.model_loaded = model is not None
 
 # -----------------------
-# MQTT Worker
+# MQTT Worker (FAST RESPONSE)
 # -----------------------
 def mqtt_worker(broker, port, topic_sensor, topic_output, in_q, out_q):
     client = mqtt.Client()
@@ -89,7 +89,7 @@ def mqtt_worker(broker, port, topic_sensor, topic_output, in_q, out_q):
 
             while True:
                 try:
-                    item = out_q.get(timeout=0.5)
+                    item = out_q.get(timeout=0.05)   # <— FAST RESPONSE
                 except queue.Empty:
                     item = None
 
@@ -97,8 +97,8 @@ def mqtt_worker(broker, port, topic_sensor, topic_output, in_q, out_q):
                     client.publish(
                         item["topic"],
                         item["payload"],
-                        qos=int(item.get("qos", 0)),
-                        retain=bool(item.get("retain", False))
+                        qos=0,
+                        retain=False
                     )
 
         except Exception as e:
@@ -108,7 +108,7 @@ def mqtt_worker(broker, port, topic_sensor, topic_output, in_q, out_q):
                 client.disconnect()
             except:
                 pass
-            time.sleep(2)
+            time.sleep(1)
 
 # Start MQTT Thread
 if not st.session_state.mqtt_worker_started:
@@ -126,7 +126,6 @@ if not st.session_state.mqtt_worker_started:
 # Process Incoming Data
 # -----------------------
 def process_incoming():
-    updated = False
     q = st.session_state.mqtt_in_q
 
     while not q.empty():
@@ -158,17 +157,6 @@ def process_incoming():
             except:
                 conf = None
 
-            temps = [r["temp"] for r in st.session_state.logs if r.get("temp") is not None]
-            window = temps[-st.session_state.anomaly_window:] if len(temps) > 0 else []
-
-            if len(window) >= 5:
-                mean = float(np.mean(window))
-                std = float(np.std(window))
-                if std > 0:
-                    z = abs((temp - mean) / std)
-                    if z >= ANOMALY_Z_THRESHOLD:
-                        anomaly = True
-
         row.update({"pred": pred, "conf": conf, "anomaly": anomaly})
         st.session_state.last = row
         st.session_state.logs.append(row)
@@ -176,38 +164,23 @@ def process_incoming():
         if len(st.session_state.logs) > 5000:
             st.session_state.logs = st.session_state.logs[-5000:]
 
-        updated = True
-
-        # ----------------------------------------------------
-        # SEND ML PREDICTION BACK TO ESP32  (SAFE ADDED BLOCK)
-        # ----------------------------------------------------
+        # SEND ML prediction → ESP32
         if pred is not None:
-            try:
-                st.session_state.mqtt_out_q.put({
-                    "topic": TOPIC_OUTPUT,
-                    "payload": str(pred)
-                })
-            except Exception as e:
-                print("Failed sending prediction:", e)
-        # ----------------------------------------------------
-
-    return updated
+            st.session_state.mqtt_out_q.put({
+                "topic": TOPIC_OUTPUT,
+                "payload": str(pred)
+            })
 
 process_incoming()
 
 # -----------------------
-# UI
+# UI SETUP
 # -----------------------
 st.set_page_config(page_title="IoT ML Realtime Dashboard", layout="wide")
-st.title("🔥 IoT ML Realtime Dashboard — ML Enhanced Version")
+st.title("🔥 IoT ML Realtime Dashboard — FINAL FAST VERSION")
 
-# Model status
-if st.session_state.model_loaded:
-    st.success(f"ML Model Loaded: {MODEL_PATH}")
-else:
-    st.warning("Model not loaded.")
-
-st_autorefresh(interval=2000, limit=None, key="refresh")
+# Auto-refresh (fast)
+st_autorefresh(interval=500, limit=None, key="refresh")
 
 left, right = st.columns([1,2])
 
@@ -222,24 +195,41 @@ with left:
     if st.session_state.last:
         last = st.session_state.last
         st.write(f"Time: {last['ts']}")
-        st.write(f"Temperature : {last['temp']} °C")
-        st.write(f"Humidity    : {last['hum']} %")
-        st.write(f"Prediction  : {last['pred']}")
-        st.write(f"Confidence  : {last['conf']}")
-        st.write(f"Anomaly     : {last['anomaly']}")
+        st.write(f"Temp : {last['temp']} °C")
+        st.write(f"Hum  : {last['hum']} %")
+        st.write(f"Pred : {last['pred']}")
+        st.write(f"Conf : {last['conf']}")
+        st.write(f"Anom : {last['anomaly']}")
     else:
         st.info("Waiting for data...")
 
-    st.markdown("### Manual Control")
+    st.markdown("### Manual Control (FAST)")
     col1, col2 = st.columns(2)
-    if col1.button("Send ALERT_ON"):
+    if col1.button("ALERT_ON"):
         st.session_state.mqtt_out_q.put({"topic": TOPIC_OUTPUT, "payload": "ALERT_ON"})
-    if col2.button("Send ALERT_OFF"):
+    if col2.button("ALERT_OFF"):
         st.session_state.mqtt_out_q.put({"topic": TOPIC_OUTPUT, "payload": "ALERT_OFF"})
 
     st.markdown("### Anomaly Settings")
-    w = st.slider("Window Size", 5, 200, st.session_state.anomaly_window)
-    st.session_state.anomaly_window = w
+    st.session_state.anomaly_window = st.slider(
+        "Window Size", 5, 200, st.session_state.anomaly_window
+    )
+
+    # -----------------------
+    # DOWNLOAD CSV (RESTORED)
+    # -----------------------
+    st.markdown("### Download Logs")
+    if st.button("Download CSV"):
+        if st.session_state.logs:
+            df = pd.DataFrame(st.session_state.logs)
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download CSV file",
+                csv,
+                file_name=f"iot_logs_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.csv"
+            )
+        else:
+            st.warning("No logs yet")
 
 # -----------------------
 # RIGHT PANEL
@@ -251,7 +241,7 @@ with right:
     if not df_plot.empty:
         fig = go.Figure()
 
-        # Temperature line
+        # Temperature
         fig.add_trace(go.Scatter(
             x=df_plot["ts"],
             y=df_plot["temp"],
@@ -259,7 +249,7 @@ with right:
             name="Temperature (°C)"
         ))
 
-        # Humidity line  ← (DITAMBAHKAN KEMBALI)
+        # Humidity (FIXED)
         fig.add_trace(go.Scatter(
             x=df_plot["ts"],
             y=df_plot["hum"],
@@ -268,7 +258,6 @@ with right:
             yaxis="y2"
         ))
 
-        # Dual-axis
         fig.update_layout(
             yaxis=dict(title="Temperature (°C)"),
             yaxis2=dict(title="Humidity (%)", overlaying="y", side="right")
@@ -279,5 +268,3 @@ with right:
     st.markdown("### Recent Logs")
     if st.session_state.logs:
         st.dataframe(pd.DataFrame(st.session_state.logs)[::-1].head(50))
-
-process_incoming()
