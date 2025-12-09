@@ -22,7 +22,7 @@ TOPIC_OUTPUT = "iot/sic/make/output"
 MODEL_PATH = "iot_temp_model.pkl"
 
 MAX_POINTS = 200
-ANOMALY_Z_THRESHOLD = 3.0
+ANOMALY_Z_THRESHOLD = 3.0 # Variabel global default
 
 # -----------------------
 # Session State
@@ -128,6 +128,10 @@ if not st.session_state.mqtt_worker_started:
 def process_incoming():
     updated = False
     q = st.session_state.mqtt_in_q
+    
+    # Ambil nilai threshold global terbaru
+    global ANOMALY_Z_THRESHOLD 
+    current_z_threshold = ANOMALY_Z_THRESHOLD 
 
     while not q.empty():
         item = q.get()
@@ -166,7 +170,8 @@ def process_incoming():
                 std = float(np.std(window))
                 if std > 0:
                     z = abs((temp - mean) / std)
-                    if z >= ANOMALY_Z_THRESHOLD:
+                    # Menggunakan current_z_threshold
+                    if z >= current_z_threshold: 
                         anomaly = True
 
         row.update({"pred": pred, "conf": conf, "anomaly": anomaly})
@@ -178,9 +183,7 @@ def process_incoming():
 
         updated = True
 
-        # ----------------------------------------------------
-        # SEND ML PREDICTION BACK TO ESP32  (SAFE ADDED BLOCK)
-        # ----------------------------------------------------
+        # SEND ML PREDICTION BACK TO ESP32
         if pred is not None:
             try:
                 st.session_state.mqtt_out_q.put({
@@ -189,7 +192,6 @@ def process_incoming():
                 })
             except Exception as e:
                 print("Failed sending prediction:", e)
-        # ----------------------------------------------------
 
     return updated
 
@@ -203,9 +205,9 @@ st.title("🔥 IoT ML Realtime Dashboard — ML Enhanced Version")
 
 # Model status
 if st.session_state.model_loaded:
-    st.success(f"ML Model Loaded: {MODEL_PATH}")
+    st.success(f"ML Model Loaded: **{MODEL_PATH}**")
 else:
-    st.warning("Model not loaded.")
+    st.warning("Model not loaded. Place iot_temp_model.pkl next to app.py")
 
 st_autorefresh(interval=2000, limit=None, key="refresh")
 
@@ -221,12 +223,13 @@ with left:
     st.markdown("### Last Reading")
     if st.session_state.last:
         last = st.session_state.last
-        st.write(f"Time: {last['ts']}")
-        st.write(f"Temperature : {last['temp']} °C")
-        st.write(f"Humidity    : {last['hum']} %")
-        st.write(f"Prediction  : {last['pred']}")
-        st.write(f"Confidence  : {last['conf']}")
-        st.write(f"Anomaly     : {last['anomaly']}")
+        st.write(f"**Time (WIB):** {last['ts']}")
+        st.write(f"**Temperature:** {last['temp']} °C")
+        st.write(f"**Humidity:** {last['hum']} %")
+        st.write(f"**Prediction:** {last['pred']}")
+        st.write(f"**Confidence:** {last['conf']:.2f}")
+        anomaly_status = "⚠️ **ANOMALY DETECTED**" if last['anomaly'] else "✅ Normal"
+        st.write(f"**Anomaly:** {anomaly_status}")
     else:
         st.info("Waiting for data...")
 
@@ -234,12 +237,40 @@ with left:
     col1, col2 = st.columns(2)
     if col1.button("Send ALERT_ON"):
         st.session_state.mqtt_out_q.put({"topic": TOPIC_OUTPUT, "payload": "ALERT_ON"})
+        st.success("Published ALERT_ON")
     if col2.button("Send ALERT_OFF"):
         st.session_state.mqtt_out_q.put({"topic": TOPIC_OUTPUT, "payload": "ALERT_OFF"})
+        st.success("Published ALERT_OFF")
 
     st.markdown("### Anomaly Settings")
-    w = st.slider("Window Size", 5, 200, st.session_state.anomaly_window)
+    
+    # PERBAIKAN: Deklarasi global harus di awal blok ini
+    global ANOMALY_Z_THRESHOLD 
+    
+    w = st.slider("Window Size (History Points)", 5, 200, st.session_state.anomaly_window)
     st.session_state.anomaly_window = w
+    
+    # Input Z-Score Threshold
+    zthr = st.number_input("Z-score Threshold", value=float(ANOMALY_Z_THRESHOLD))
+    
+    # Update ANOMALY_Z_THRESHOLD global
+    ANOMALY_Z_THRESHOLD = float(zthr)
+    
+    # --- Tambahkan Menu Download CSV ---
+    st.markdown("### Download Logs")
+    if st.button("Download CSV Log"):
+        if st.session_state.logs:
+            df = pd.DataFrame(st.session_state.logs)
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Download CSV file", 
+                data=csv, 
+                file_name=f"iot_logs_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.csv",
+                mime="text/csv" # MIME type agar Streamlit tahu itu CSV
+            )
+        else:
+            st.warning("No logs yet")
+    # ------------------------------------
 
 # -----------------------
 # RIGHT PANEL
@@ -248,36 +279,63 @@ with right:
     st.header(f"Live Chart (Last {MAX_POINTS} Points)")
     df_plot = pd.DataFrame(st.session_state.logs[-MAX_POINTS:])
 
-    if not df_plot.empty:
+    # Pastikan data ada dan kolom 'temp'/'hum' tersedia untuk plotting
+    if not df_plot.empty and "temp" in df_plot.columns and "hum" in df_plot.columns:
         fig = go.Figure()
 
-        # Temperature line
+        # Trace 1: Temperature (Sumbu Y Utama/Kiri)
         fig.add_trace(go.Scatter(
             x=df_plot["ts"],
             y=df_plot["temp"],
             mode="lines+markers",
-            name="Temperature (°C)"
+            name="Temperature (°C)",
+            line=dict(color='red')
         ))
 
-        # Humidity line  ← (DITAMBAHKAN KEMBALI)
+        # Trace 2: Humidity (Sumbu Y Sekunder/Kanan)
         fig.add_trace(go.Scatter(
             x=df_plot["ts"],
             y=df_plot["hum"],
             mode="lines+markers",
             name="Humidity (%)",
-            yaxis="y2"
+            yaxis="y2", # Menggunakan sumbu Y sekunder
+            line=dict(color='blue')
         ))
 
-        # Dual-axis
+        # Penanda (Markers) berdasarkan Anomaly dan Prediksi ML
+        colors = []
+        for idx, r in df_plot.iterrows():
+            if r.get("anomaly"):
+                colors.append("red") # Anomaly
+            else:
+                if r.get("pred") == "Panas":
+                    colors.append("orange")
+                elif r.get("pred") == "Normal":
+                    colors.append("green")
+                elif r.get("pred") == "Dingin":
+                    colors.append("blue")
+                else:
+                    colors.append("grey") # Default/No Prediction
+
+        # Terapkan warna marker ke trace Temperature
+        fig.update_traces(marker=dict(size=8, color=colors), selector=dict(name="Temperature (°C)"))
+        
+        # Dual-axis configuration
         fig.update_layout(
-            yaxis=dict(title="Temperature (°C)"),
-            yaxis2=dict(title="Humidity (%)", overlaying="y", side="right")
+            yaxis=dict(title="Temperature (°C)", titlefont=dict(color='red')),
+            yaxis2=dict(title="Humidity (%)", overlaying="y", side="right", titlefont=dict(color='blue'), showgrid=False),
+            height=500,
+            margin=dict(t=30)
         )
 
         st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No data yet or incomplete columns for plotting.")
 
     st.markdown("### Recent Logs")
     if st.session_state.logs:
         st.dataframe(pd.DataFrame(st.session_state.logs)[::-1].head(50))
+    else:
+        st.write("—")
 
 process_incoming()
