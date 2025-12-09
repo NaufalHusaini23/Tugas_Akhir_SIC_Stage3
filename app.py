@@ -8,7 +8,7 @@ import time
 import queue
 import threading
 import plotly.graph_objs as go
-from plotly.subplots import make_subplots # Import tambahan untuk Dual Y-Axis
+from plotly.subplots import make_subplots
 import paho.mqtt.client as mqtt
 from streamlit_autorefresh import st_autorefresh
 from datetime import datetime, timezone, timedelta
@@ -23,7 +23,7 @@ TOPIC_OUTPUT = "iot/sic/make/output"
 MODEL_PATH = "iot_temp_model.pkl"
 
 MAX_POINTS = 200
-ANOMALY_Z_THRESHOLD = 3.0
+ANOMALY_Z_THRESHOLD = 3.0 # Variabel global
 
 # -----------------------
 # Session state init
@@ -73,7 +73,6 @@ def mqtt_worker(broker, port, topic_sensor, topic_output, in_q, out_q):
             payload = msg.payload.decode()
             data = json.loads(payload)
             in_q.put({
-                # Waktu menggunakan UTC+7 (WIB)
                 "ts": (datetime.utcnow() + timedelta(hours=7)).isoformat(),
                 "topic": msg.topic,
                 "payload": data
@@ -130,6 +129,10 @@ if not st.session_state.mqtt_worker_started:
 def process_incoming():
     updated = False
     q = st.session_state.mqtt_in_q
+    
+    # Ambil nilai threshold global terbaru dari UI
+    global ANOMALY_Z_THRESHOLD 
+    current_z_threshold = ANOMALY_Z_THRESHOLD 
 
     while not q.empty():
         item = q.get()
@@ -167,11 +170,11 @@ def process_incoming():
 
             if len(window) >= 5:
                 mean = float(np.mean(window))
-                # ddof=0 for population standard deviation (default for numpy)
-                std = float(np.std(window)) 
+                std = float(np.std(window))
                 if std > 0:
                     z = abs((temp - mean) / std)
-                    if z >= ANOMALY_Z_THRESHOLD:
+                    # Menggunakan current_z_threshold dari UI
+                    if z >= current_z_threshold: 
                         anomaly = True
 
         row.update({"pred": pred, "conf": conf, "anomaly": anomaly})
@@ -188,7 +191,7 @@ def process_incoming():
             try:
                 st.session_state.mqtt_out_q.put({
                     "topic": TOPIC_OUTPUT,
-                    "payload": str(pred) # Mengirim prediksi (e.g., 'Panas', 'Normal')
+                    "payload": str(pred)
                 })
             except Exception as e:
                 print("Failed sending prediction:", e)
@@ -227,7 +230,6 @@ with left:
         st.write(f"**Hum :** **{last['hum']} %**")
         st.write(f"**Prediction:** **{last['pred']}**")
         st.write(f"**Confidence:** {last['conf']:.2f}")
-        # Tambahkan emoji untuk Anomaly
         anomaly_status = "⚠️ **ANOMALY DETECTED**" if last['anomaly'] else "✅ Normal"
         st.write(f"**Anomaly:** {anomaly_status}")
     else:
@@ -243,11 +245,17 @@ with left:
         st.success("Published ALERT_OFF")
 
     st.markdown("### Anomaly Settings")
+    
+    # PERBAIKAN: Deklarasi global harus di awal blok UI yang memodifikasi variabel
+    global ANOMALY_Z_THRESHOLD 
+    
     w = st.slider("anomaly window (history points)", 5, 200, st.session_state.anomaly_window)
     st.session_state.anomaly_window = w
+    
+    # ANOMALY_Z_THRESHOLD digunakan di sini
     zthr = st.number_input("z-score threshold", value=float(ANOMALY_Z_THRESHOLD))
-    # Update global variable for immediate use
-    global ANOMALY_Z_THRESHOLD 
+    
+    # ANOMALY_Z_THRESHOLD diubah di sini
     ANOMALY_Z_THRESHOLD = float(zthr)
 
     st.markdown("### Download Logs")
@@ -263,6 +271,7 @@ with right:
     st.header(f"Live Chart (last {MAX_POINTS} points)")
     df_plot = pd.DataFrame(st.session_state.logs[-MAX_POINTS:])
     
+    # Memastikan kolom yang dibutuhkan ada sebelum plotting
     if not df_plot.empty and "temp" in df_plot.columns and "hum" in df_plot.columns:
         
         # Inisialisasi subplot untuk Dual Y-Axis
@@ -311,7 +320,6 @@ with right:
 
     st.markdown("### Recent Logs")
     if st.session_state.logs:
-        # Menampilkan logs terbaru dalam DataFrame
         st.dataframe(pd.DataFrame(st.session_state.logs)[::-1].head(50))
     else:
         st.write("—")
