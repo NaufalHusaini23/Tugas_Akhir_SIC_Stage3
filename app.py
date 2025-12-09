@@ -244,7 +244,7 @@ with left:
 
     st.markdown("### Anomaly Settings")
     
-    # PERBAIKAN: Deklarasi global harus di awal blok ini
+    # Deklarasi global harus di awal blok ini (tanpa mengubah logika Anda)
     global ANOMALY_Z_THRESHOLD 
     
     w = st.slider("Window Size (History Points)", 5, 200, st.session_state.anomaly_window)
@@ -256,7 +256,7 @@ with left:
     # Update ANOMALY_Z_THRESHOLD global
     ANOMALY_Z_THRESHOLD = float(zthr)
     
-    # --- Tambahkan Menu Download CSV ---
+    # --- Tambahan: Menu Download CSV ---
     st.markdown("### Download Logs")
     if st.button("Download CSV Log"):
         if st.session_state.logs:
@@ -266,7 +266,7 @@ with left:
                 label="Download CSV file", 
                 data=csv, 
                 file_name=f"iot_logs_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.csv",
-                mime="text/csv" # MIME type agar Streamlit tahu itu CSV
+                mime="text/csv"
             )
         else:
             st.warning("No logs yet")
