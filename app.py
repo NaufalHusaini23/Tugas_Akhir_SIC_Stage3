@@ -177,7 +177,7 @@ process_incoming()
 # UI SETUP
 # -----------------------
 st.set_page_config(page_title="IoT ML Realtime Dashboard", layout="wide")
-st.title("🔥 IoT ML Realtime Dashboard — FINAL FAST VERSION")
+st.title("IoT ML Realtime Dashboard — Pemantauan Ruang Server")
 
 # Auto-refresh (fast)
 st_autorefresh(interval=500, limit=None, key="refresh")
@@ -268,3 +268,4 @@ with right:
     st.markdown("### Recent Logs")
     if st.session_state.logs:
         st.dataframe(pd.DataFrame(st.session_state.logs)[::-1].head(50))
+
