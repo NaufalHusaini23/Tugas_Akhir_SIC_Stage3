@@ -375,7 +375,7 @@ process_incoming()
 st.markdown("""
 <div class="header glass neon" style="display:flex; justify-content:space-between; align-items:center;">
   <div>
-    <div class="h1">🌌 IoT ML Realtime — Ultra Aurora</div>
+    <div class="h1">🌌 IoT ML Realtime — Pemantauan Ruang Server</div>
     <div class="h2">Smart Environment Monitoring • Streamlit + MQTT + scikit-learn</div>
   </div>
   <div style="text-align:right;">
@@ -493,3 +493,4 @@ with right:
 
 # final process incoming call (keeps behavior)
 process_incoming()
+
